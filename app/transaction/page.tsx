@@ -1,61 +1,55 @@
 "use client";
 import { LineChart } from "@mantine/charts";
-import { ColorSchemeScript, MantineProvider } from "@mantine/core";
-import {
-  monthlySpending,
-  sortByDate,
-  Transaction,
-} from "../functions/transaction_functions";
-import { useEffect, useState } from "react";
+import { Layout, Typography, Card, Input, List, Spin, Skeleton, Divider, Row, Col, Modal, Form, InputNumber, DatePicker } from "antd";
+import { useEffect, useState, useMemo } from "react";
 import { useUser } from "@auth0/nextjs-auth0/client";
+import InfiniteScroll from "react-infinite-scroll-component";
 import dayjs from "dayjs";
-import { Button, Card, Divider, List, Skeleton, Spin } from "antd";
-import "@mantine/core/styles/global.css";
-import "@mantine/charts/styles.css";
-import { useRouter } from "next/navigation";
-import InfiniteScroll from 'react-infinite-scroll-component';
 import MenuList from "../components/menuList";
+import { monthlySpending, sortByDate, Transaction, uploadEditedTranscation } from "../functions/transaction_functions";
+
+const { Header, Content } = Layout;
+const { Title, Text } = Typography;
 
 export default function TransactionPage() {
   const { user, isLoading } = useUser();
-  const [historicalSpending, setHistoricalSpending] = useState<
-    { date: string; "Total spending": number }[]
-  >([]);
-  const [historicalTransaction, setHistoricalTransaction] = useState<
-    Transaction[]
-  >([]);
+  const [collapsed, setCollapsed] = useState(false);
+  const [historicalSpending, setHistoricalSpending] = useState<{ date: string; "Total spending": number }[]>([]);
+  const [historicalTransaction, setHistoricalTransaction] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filterText, setFilterText] = useState("");
+
+  // State for edit modal
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [currentTransaction, setCurrentTransaction] = useState<Transaction | null>(null);
+  const [form] = Form.useForm();
 
   async function getData() {
     if (!isLoading && user) {
       const userData = await monthlySpending(user!);
-      setHistoricalTransaction(
-        sortByDate("new_to_old", userData.response?.transactions)!
-      );
+      setHistoricalTransaction(sortByDate("new_to_old", userData.response?.transactions)!);
       prepareChartData(userData.response?.transactions);
     }
   }
 
   function prepareChartData(transactions: Transaction[]) {
-    // Sort transactions by date (ascending)
-    if(transactions != null ){
-      const sortedTransactions = [...transactions].sort(
-        (a, b) => a.date!.valueOf() - b.date!.valueOf()
-      );
+    if (transactions) {
       let cumulativeSum = 0;
-      const chartData = sortedTransactions.map((transaction) => {
-        cumulativeSum += transaction.cost || 0; // Add cost to cumulative sum
-        return {
-          date: dayjs(transaction.date).format("YYYY-MM-DD"), // Format date as ISO string
-          "Total spending": cumulativeSum, // Cumulative sum up to this point
-        };
-      });
+      const chartData = transactions
+        .sort((a, b) => a.date!.valueOf() - b.date!.valueOf())
+        .map((transaction) => {
+          cumulativeSum += transaction.cost || 0;
+          return { date: dayjs(transaction.date).format("YYYY-MM-DD"), "Total spending": cumulativeSum };
+        });
       setHistoricalSpending(chartData);
     }
     setLoading(false);
   }
 
-  const router = useRouter();
+  const filteredTransactions = useMemo(() => {
+    return historicalTransaction.filter((item) => item.name.toLowerCase().includes(filterText.toLowerCase()));
+  }, [historicalTransaction, filterText]);
+
   useEffect(() => {
     if (!isLoading && user) {
       getData();
@@ -64,95 +58,164 @@ export default function TransactionPage() {
 
   if (loading) {
     return (
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          flexDirection: "column", // Stack items vertically
-          height: "100vh", // Full screen height
-          width: "100vw", // Full screen width
-        }}
-      >
-        <ColorSchemeScript defaultColorScheme="light" />
+      <Layout style={{ height: "100vh", display: "flex", justifyContent: "center", alignItems: "center", backgroundColor: "#f0f2f5" }}>
         <Spin size="large" />
-        <div style={{ marginTop: "1rem", fontSize: "1.2rem" }}>
-          Fetching Data
-        </div>
-      </div>
+        <Text style={{ marginTop: "1rem", fontSize: "1.2rem", color: "#555" }}>Fetching Data...</Text>
+      </Layout>
     );
   }
 
+  // Open edit modal
+  const openEditModal = (transaction: Transaction) => {
+    setCurrentTransaction(transaction);
+    form.setFieldsValue({
+      name: transaction.name,
+      cost: transaction.cost,
+      date: dayjs(transaction.date),
+      description: transaction.description,
+    });
+    setIsEditModalOpen(true);
+  };
+
+  // Handle edit form submission
+  const handleEditTransaction = async () => {
+    try {
+      const values = await form.validateFields();
+      values.date = dayjs(values.date).format("YYYY-MM-DD");
+
+      if (currentTransaction) {
+        const response = await uploadEditedTranscation(values, user!, currentTransaction._id!);
+        if (response.success) {
+          setIsEditModalOpen(false);
+          form.resetFields();
+          getData(); // Refresh transaction list
+        }
+      }
+    } catch (error) {
+      console.error("Error updating transaction:", error);
+    }
+  };
+
   return (
-    <MantineProvider defaultColorScheme={"light"}>
-      <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', gap: '20px', padding: '20px' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 256}}>
-        <div style={{ textAlign: 'center', padding: '20px 0' }}>
-          <img
-            src="calicoWDiscription.png"
-            alt="Logo"
-            style={{
-              width: '150px', // Adjust width as needed
-              height: 'auto', // Maintain aspect ratio
-              marginBottom: '10px', // Add space below the image
-            }}
-          />
-        </div>
-        <MenuList />
-      </div>
+    <Layout style={{ minHeight: "100vh", background: "#f9f9f9", display: "flex", transition: "all 0.3s ease-in-out" }}>
+      
+      {/* Sidebar */}
+      <MenuList collapsed={collapsed} setCollapsed={setCollapsed} user={user!} refreshTransactions={getData} />
+
+      <Layout style={{ padding: "24px", flex: 1, marginLeft: collapsed ? "80px" : "250px", transition: "all 0.3s ease-in-out" }}>
         
-        {/* Chart Section */}
-        <div style={{ flex: 1 }}>
-          <h2>Transaction Page</h2>
-          <LineChart
-            h={300}
-            data={historicalSpending}
-            dataKey="date"
-            series={[{ name: "Total spending", color: "indigo.6" }]}
-            curveType="linear"
-            connectNulls
-          />
-        </div>
+        {/* Header */}
+        <Header
+          style={{
+            background: "#fff",
+            padding: "16px",
+            borderRadius: "8px",
+            marginBottom: "20px",
+            boxShadow: "0px 2px 8px rgba(0,0,0,0.1)",
+          }}
+        >
+          <Title level={3} style={{ margin: 0 }}>Transaction Dashboard</Title>
+        </Header>
 
-        {/* Recent Transactions Section */}
-        <div style={{ flex: 1 }}>
-          <h2>Recent Transactions</h2>
-          <InfiniteScroll
-            dataLength={historicalTransaction.length}
-            next={getData}
-            hasMore={historicalTransaction.length < 5}
-            loader={<Skeleton avatar paragraph={{ rows: 1 }} active />}
-            endMessage={<Divider plain>It is all, nothing more 🤐</Divider>}
-            scrollableTarget="scrollableDiv"
-          >
-        <List
-            itemLayout="horizontal"
-            dataSource={historicalTransaction}
-            renderItem={(item) => (
-              <Card>
-                <List.Item
-                  actions={[
-                    <a
-                      key="list-loadmore-edit"
-                    >
-                      Edit
-                    </a>,
-                  ]}
-                >
-                  <List.Item.Meta
-                    title={item.name}
-                    description={"$" + item.cost}
+        <Content>
+          <Row gutter={[24, 24]}>
+            
+            {/* Transaction Overview (Chart) */}
+            <Col xs={24} md={12}>
+              <Card
+                title="Transaction Overview"
+                bordered={false}
+                style={{ borderRadius: "8px", boxShadow: "0px 2px 8px rgba(0,0,0,0.1)" }}
+              >
+                {historicalSpending.length > 0 ? (
+                  <LineChart
+                    h={300}
+                    data={historicalSpending}
+                    dataKey="date"
+                    series={[{ name: "Total spending", color: "indigo.6" }]}
+                    curveType="linear"
+                    connectNulls
                   />
-                </List.Item>
+                ) : (
+                  <Text type="secondary">No data available</Text>
+                )}
               </Card>
-            )}
-          />
-      </InfiniteScroll>
-          
-        </div>
-      </div>
-      <Button onClick={() => router.push("/homepage")}>Dashboard</Button>
-    </MantineProvider>
+            </Col>
 
+            {/* Recent Transactions */}
+            <Col xs={24} md={12}>
+              <Card
+                title="Recent Transactions"
+                bordered={false}
+                style={{ borderRadius: "8px", boxShadow: "0px 2px 8px rgba(0,0,0,0.1)" }}
+              >
+                {/* Search Bar */}
+                <Input
+                  placeholder="Search transactions..."
+                  value={filterText}
+                  onChange={(event) => setFilterText(event.target.value)}
+                  size="large"
+                  style={{ marginBottom: "12px", borderRadius: "6px" }}
+                />
+
+                {/* Infinite Scroll List */}
+                <div id="scrollableDiv" style={{ height: "300px", overflowY: "auto", paddingRight: "10px" }}>
+                  <InfiniteScroll
+                    dataLength={filteredTransactions.length}
+                    next={getData}
+                    hasMore={filteredTransactions.length < 5}
+                    loader={<Skeleton avatar paragraph={{ rows: 1 }} active />}
+                    endMessage={<Divider plain>It is all, nothing more 🤐</Divider>}
+                    scrollableTarget="scrollableDiv"
+                  >
+                    <List
+                      itemLayout="horizontal"
+                      dataSource={filteredTransactions}
+                      renderItem={(item) => (
+                        <Card
+                          hoverable
+                          style={{ borderRadius: "8px", marginBottom: "10px", boxShadow: "0px 2px 6px rgba(0,0,0,0.08)" }}
+                        >
+                          <List.Item actions={[<a key="edit" onClick={() => openEditModal(item)}>Edit</a>]}>
+                            <List.Item.Meta
+                              title={<Text strong>{item.name}</Text>}
+                              description={<Text type="secondary">${item.cost!.toFixed(2)}</Text>}
+                            />
+                          </List.Item>
+                        </Card>
+                      )}
+                    />
+                  </InfiniteScroll>
+                </div>
+              </Card>
+            </Col>
+          </Row>
+        </Content>
+      </Layout>
+
+      {/* Edit Transaction Modal */}
+      <Modal
+        title="Edit Transaction"
+        open={isEditModalOpen}
+        onOk={handleEditTransaction}
+        onCancel={() => setIsEditModalOpen(false)}
+        style={{ borderRadius: "10px" }}
+      >
+        <Form form={form} layout="vertical">
+          <Form.Item label="Name" name="name" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item label="Cost" name="cost" rules={[{ required: true }]}>
+            <InputNumber prefix="$" />
+          </Form.Item>
+          <Form.Item label="Date" name="date" rules={[{ required: true }]}>
+            <DatePicker />
+          </Form.Item>
+          <Form.Item label="Description" name="description">
+            <Input />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </Layout>
   );
 }
