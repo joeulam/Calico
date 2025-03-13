@@ -1,4 +1,5 @@
 "use client";
+import "@mantine/charts/styles.css";
 import React, { useEffect, useState } from "react";
 import { useUser } from "@auth0/nextjs-auth0/client";
 import { Card, Layout, List, Spin, Typography, Skeleton, Divider } from "antd";
@@ -12,6 +13,8 @@ import {
   userExist,
 } from "../functions/transaction_functions";
 import MenuList from "../components/menuList";
+import "@mantine/charts/styles.css";
+import "@mantine/core/styles.css";
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -19,7 +22,9 @@ const { Title, Text } = Typography;
 export default function HomePage() {
   const { user, error, isLoading } = useUser();
   const [collapsed, setCollapsed] = useState(false);
-  const [historicalTransaction, setHistoricalTransaction] = useState<Transaction[]>([]);
+  const [historicalTransaction, setHistoricalTransaction] = useState<
+    Transaction[]
+  >([]);
   const [historicalSpending, setHistoricalSpending] = useState<
     { date: string; "Total spending": number }[]
   >([]);
@@ -32,14 +37,21 @@ export default function HomePage() {
       if (response?.success) {
         const userData = await monthlySpending(user!);
         const transactions = userData.response.transactions;
-        
+
         // Set recent transactions (sorted new-to-old)
-        setHistoricalTransaction(sortByDate("new_to_old", transactions)!);
-        
+        setHistoricalTransaction(sortByDate("new_to_old", transactions));
         // Prepare chart data for all transactions (sorted old-to-new)
         let cumulativeSum = 0;
-        const chartData = sortByDate("old_to_new", transactions)?.map((transaction) => {
-          cumulativeSum += transaction.cost || 0;
+        console.log(dayjs().month() + 1);
+        const chartData = sortByDate(
+          "old_to_new",
+          transactions.filter(
+            (item: {
+              date: string | number | dayjs.Dayjs | Date | null | undefined;
+            }) => Number(dayjs(item.date).format("M")) == dayjs().month()+1
+          )
+        )?.map((transaction) => {
+          cumulativeSum += Number(transaction.cost?.toPrecision(2)) || 0;
           return {
             date: dayjs(transaction.date).format("YYYY-MM-DD"),
             "Total spending": cumulativeSum,
@@ -132,15 +144,15 @@ export default function HomePage() {
             }}
           >
             <Title level={4} style={{ marginBottom: "10px", color: "#333" }}>
-              Transaction Overview
+              Monthly Transaction Overview
             </Title>
-            {historicalSpending.length > 0 ? (
+            {historicalSpending.length > 0 && !isLoading ? (
               <LineChart
                 h={300}
                 data={historicalSpending}
                 dataKey="date"
                 series={[{ name: "Total spending" }]}
-                curveType="linear"
+                curveType="natural"
                 connectNulls
               />
             ) : (
