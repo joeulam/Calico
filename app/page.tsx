@@ -3,7 +3,6 @@ import React, { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button, Card } from 'antd';
 import Image from 'next/image';
-
 const LoginPage = () => {
   const router = useRouter();
 
